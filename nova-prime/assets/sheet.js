@@ -136,13 +136,40 @@
 
   // ---------------------------------------------------------------
   // 提出処理：送信先を変えるときはこの関数だけ差し替える
-  //   例）フォーム送信・スプレッドシート連携など
-  //   現在：回答をクリップボードにコピーし、本人がLINE等で送る方式
-  //   ※ 回答（個人情報）を外部へ自動送信する処理は入れていません
+  //   config.js の submitEndpoint が設定されていれば、Google スプレッドシート
+  //   （Apps Script ウェブアプリ）へ A〜U列の並びで送信する。
+  //   未設定なら、回答をクリップボードにコピーして本人が LINE 等で送る方式。
+  //   戻り値：{ ok, sent, copied, error }
   // ---------------------------------------------------------------
+  function submitEndpoint() {
+    var cfg = window.STEP0_CONFIG || {};
+    return typeof cfg.submitEndpoint === "string" ? cfg.submitEndpoint.trim() : "";
+  }
+
   function submitAnswers(payload) {
-    return Step0.copyText(payload.text).then(function (copied) {
-      return { ok: true, copied: copied };
+    var endpoint = submitEndpoint();
+    if (!endpoint) {
+      return Step0.copyText(payload.text).then(function (copied) {
+        return { ok: true, sent: false, copied: copied };
+      });
+    }
+    if (!payload.name) return Promise.resolve({ ok: false, error: "noname" });
+
+    var ctrl = typeof AbortController === "function" ? new AbortController() : null;
+    var timer = ctrl ? setTimeout(function () { ctrl.abort(); }, 20000) : null;
+    return fetch(endpoint, {
+      method: "POST",
+      // text/plain にして CORS のプリフライトを避ける（Apps Script の制約）
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ id: payload.id, name: payload.name, answers: payload.row.slice(4) }),
+      signal: ctrl ? ctrl.signal : undefined
+    }).then(function (r) { return r.json(); }).then(function (res) {
+      return res && res.ok ? { ok: true, sent: true } : { ok: false, error: (res && res.error) || "server" };
+    }).catch(function () {
+      return { ok: false, error: "network" };
+    }).then(function (result) {
+      if (timer) clearTimeout(timer);
+      return result;
     });
   }
 
@@ -370,30 +397,45 @@
       el("p", { text: "業務を始める直前の打ち合わせです。" })
     ]));
 
-    var status = el("p", { class: "notice notice--ok", role: "status", hidden: !state.submittedAt });
-    function showSubmitted(copied) {
-      status.textContent = copied
-        ? "提出内容をコピーしました。LINEまたはメールに貼り付けて、担当者へ送ってください。"
-        : "「回答をコピー」で内容をコピーし、LINEまたはメールに貼り付けて担当者へ送ってください。";
+    var status = el("p", { class: "notice", role: "status", hidden: true });
+    function showStatus(kind, msg) {
+      status.className = "notice " + (kind === "ok" ? "notice--ok" : "notice--danger");
+      status.textContent = msg;
       status.hidden = false;
     }
-    if (state.submittedAt) showSubmitted(!!state.lastCopied);
+    function showResult(res) {
+      if (res.sent) {
+        showStatus("ok", "提出が完了しました。回答は担当者に届いています。");
+      } else if (res.ok) {
+        showStatus("ok", res.copied
+          ? "提出内容をコピーしました。LINEまたはメールに貼り付けて、担当者へ送ってください。"
+          : "「回答をコピー」で内容をコピーし、LINEまたはメールに貼り付けて担当者へ送ってください。");
+      } else if (res.error === "noname") {
+        showStatus("ng", "このページは個別リンクから開かれていないため、提出できません。担当者から届いたリンクを開き直すか、「回答をコピー」してLINE等で送ってください。");
+      } else {
+        showStatus("ng", "送信できませんでした。通信環境を確認して、もう一度「この内容で提出する」を押してください。うまくいかない場合は「回答をコピー」してLINE等で送ってください。");
+      }
+    }
+    if (state.submittedAt) showResult({ ok: true, sent: !!state.lastSent, copied: !!state.lastCopied });
 
-    var submitBtn = el("button", { type: "button", class: "btn btn--primary", text: "この内容で提出する", onclick: function () {
+    var submitLabel = state.lastSent ? "もう一度提出する" : "この内容で提出する";
+    var submitBtn = el("button", { type: "button", class: "btn btn--primary", text: submitLabel, onclick: function () {
+      if (state.lastSent && !window.confirm("すでに提出済みです。現在の内容でもう一度提出しますか？")) return;
       submitBtn.disabled = true;
-      var prev = state.submittedAt;
-      state.submittedAt = new Date().toISOString();
-      var payload = { name: person.name, id: person.id, submittedAt: state.submittedAt,
+      submitBtn.textContent = "送信中…";
+      var now = new Date().toISOString();
+      var payload = { name: person.name, id: person.id, submittedAt: now,
         answers: state.answers, text: buildText(), row: buildSheetRow() };
       submitAnswers(payload).then(function (res) {
-        state.lastCopied = !!res.copied;
-        save();
-        showSubmitted(state.lastCopied);
+        if (res.ok) {
+          state.submittedAt = now;
+          state.lastSent = !!res.sent;
+          state.lastCopied = !!res.copied;
+          save();
+        }
+        showResult(res);
         submitBtn.disabled = false;
-      }, function () {
-        state.submittedAt = prev;
-        save();
-        submitBtn.disabled = false;
+        submitBtn.textContent = state.lastSent ? "もう一度提出する" : "この内容で提出する";
       });
     } });
 
