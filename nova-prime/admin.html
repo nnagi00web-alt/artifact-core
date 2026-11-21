@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="theme-color" content="#045e52">
+  <title>リンク発行ツール（運営用） | STEP 0</title>
+  <link rel="icon" type="image/png" href="assets/favicon.png">
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="site-header__inner">
+      <img src="assets/logo.png" alt="" width="36" height="36">
+      <div class="site-header__brand">ARTIFACT CORE<span class="site-header__sub">運営用ツール</span></div>
+    </div>
+  </header>
+  <main class="wrap">
+    <p class="eyebrow">STEP 0 ／ 運営用</p>
+    <h1>STEP 0 リンク発行ツール</h1>
+
+    <div class="notice notice--danger" role="note">
+      <strong>運営専用・URL共有禁止</strong>
+      <ul>
+        <li>このページは運営専用です。契約者には配らないでください。</li>
+        <li>この admin.html のURLは誰とも共有しないでください（URLを知っていれば誰でも開けます）。</li>
+        <li>発行したリンクは本人ごとに固有で、氏名が入った状態でアンケートが開きます。必ず本人にだけ送ってください。</li>
+      </ul>
+    </div>
+
+    <p class="lead">契約者ごとに氏名を入力して個別リンクを作成し、そのリンクをLINEまたはメールで本人に送ってください。</p>
+
+    <form class="card" id="form" novalidate>
+      <div class="field">
+        <label class="label" for="baseUrl">公開ページのURL</label>
+        <p class="hint" id="baseUrlHint"></p>
+        <input type="url" id="baseUrl" inputmode="url" autocomplete="off" spellcheck="false"
+               placeholder="https://ユーザー名.github.io/リポジトリ名/nova-prime/">
+      </div>
+
+      <div class="field">
+        <label class="label" for="name">契約者の氏名</label>
+        <input type="text" id="name" autocomplete="off" placeholder="例：山田 花子" maxlength="50">
+      </div>
+
+      <p class="notice notice--danger" id="error" role="alert" hidden></p>
+
+      <div class="actions">
+        <button type="submit" class="btn btn--primary">個別リンクを発行する</button>
+      </div>
+    </form>
+
+    <section class="card" id="result" hidden aria-live="polite">
+      <div class="field">
+        <label class="label" for="output">発行された個別リンク</label>
+        <p class="hint" id="outputMeta"></p>
+        <input type="text" id="output" readonly>
+      </div>
+      <div class="actions">
+        <button type="button" class="btn btn--primary" id="copy">コピー</button>
+      </div>
+      <p class="small muted" style="margin-top:12px">※ 同じ人でも発行し直すと別のIDになり、本人の端末に保存された途中の回答は引き継がれません。一度送ったリンクは再発行せずに使ってください。</p>
+    </section>
+  </main>
+
+  <script src="assets/common.js"></script>
+  <script>
+  (function () {
+    "use strict";
+    var $ = function (id) { return document.getElementById(id); };
+    var baseUrl = $("baseUrl"), nameInput = $("name"), error = $("error");
+
+    // 共有URL（http/https）で開いた場合は現在のURLから自動入力
+    if (/^https?:$/.test(location.protocol)) {
+      baseUrl.value = new URL("./", location.href).href;
+      $("baseUrlHint").textContent = "現在のURLから自動入力しました。";
+    } else {
+      $("baseUrlHint").textContent = "手元のファイルで開いているため、公開ページのURLを入力してください。末尾は「/nova-prime/」までにします。";
+    }
+
+    function normalizeBase(raw) {
+      var u = new URL(raw.trim());
+      if (!/^https?:$/.test(u.protocol)) throw new Error("protocol");
+      u.search = "";
+      u.hash = "";
+      var href = u.href;
+      if (!/\/$/.test(href) && !/\.html?$/i.test(href)) href += "/";
+      return href;
+    }
+
+    function showError(msg) {
+      error.textContent = msg;
+      error.hidden = !msg;
+    }
+
+    $("form").addEventListener("submit", function (e) {
+      e.preventDefault();
+      showError("");
+      var base;
+      try { base = normalizeBase(baseUrl.value); }
+      catch (err) { showError("公開ページのURLを「https://」から正しく入力してください。"); baseUrl.focus(); return; }
+      var name = nameInput.value.trim().replace(/\s+/g, " ");
+      if (!name) { showError("契約者の氏名を入力してください。"); nameInput.focus(); return; }
+
+      var id = Step0.randomId(6);
+      var link = base + "?c=" + Step0.encodeParam({ n: name, i: id });
+      $("output").value = link;
+      $("outputMeta").textContent = name + " さん（ID：" + id + "）";
+      $("result").hidden = false;
+      $("result").scrollIntoView({ behavior: "smooth", block: "nearest" });
+    });
+
+    $("copy").addEventListener("click", function () {
+      var btn = this, text = $("output").value;
+      Step0.copyText(text).then(function (ok) {
+        if (ok) { Step0.flashButton(btn, "コピーしました ✓"); }
+        else { $("output").select(); Step0.flashButton(btn, "選択しました。長押しでコピーしてください", 3000); }
+      });
+    });
+  })();
+  </script>
+</body>
+</html>
